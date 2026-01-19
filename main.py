@@ -77,8 +77,36 @@ def generate_title(text):
     return response.choices[0].message.content
 
 def run():
-    VIDEO_URL = "PASTE_VIDEO_URL_HERE"
+    from googleapiclient.discovery import build
+
+def get_latest_videos(channel_ids, max_results=3):
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    videos = []
+    for channel_url in channel_ids:
+        channel_id = channel_url.split("/")[-1]  # get ID from URL
+        request = youtube.search().list(
+            part="snippet",
+            channelId=channel_id,
+            maxResults=max_results,
+            order="date",
+            type="video"
+        )
+        response = request.execute()
+        for item in response.get("items", []):
+            videos.append(f'https://www.youtube.com/watch?v={item["id"]["videoId"]}')
+    return videos
+
+# Replace single VIDEO_URL with:
+video_urls = get_latest_videos(SOURCE_CHANNELS)
+for VIDEO_URL in video_urls:
     download_video(VIDEO_URL)
+    segments = transcribe()
+    clips = find_best_clips(segments)
+    for i, c in enumerate(clips):
+        cut_clip(c["start"], c["end"], i)
+        title = generate_title(c["text"])
+        upload_to_youtube(f"clip_{i}.mp4", title)
+
     segments = transcribe()
     clips = find_best_clips(segments)
 
