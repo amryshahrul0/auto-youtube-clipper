@@ -140,22 +140,16 @@ def run():
         clips = select_clips(segments)
         random.shuffle(clips)  # Randomize clip selection
 
-        for i, clip_data in enumerate(clips):
+        for i, c in enumerate(clips):
             if clips_uploaded >= CLIPS_PER_DAY:
                 break
             try:
-                clip_file = cut_clip(clip_data["start"], clip_data["end"], i)
-                title = generate_title(clip_data["text"])
+                clip_file = cut_clip(c["start"], c["end"], i)
+                title = generate_title(c["text"])
                 upload_to_youtube(clip_file, title)
                 clips_uploaded += 1
             except Exception as e:
                 print(f"Error processing clip: {e}")
-
-if __name__ == "__main__":
-    run()
-        cut_clip(c["start"], c["end"], i)
-        title = generate_title(c["text"])
-        upload_to_youtube(f"clip_{i}.mp4", title)
 
 if __name__ == "__main__":
     run()
