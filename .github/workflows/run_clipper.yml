@@ -1,10 +1,8 @@
 name: Auto YouTube Clipper
 
 on:
-  # Run automatically every 3 hours
   schedule:
-    - cron: "0 */3 * * *"
-  # Run manually if needed
+    - cron: "0 */3 * * *"  # every 3 hours
   workflow_dispatch:
 
 jobs:
@@ -12,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout the repository
+      # 1️⃣ Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v3
 
@@ -29,9 +27,9 @@ jobs:
           python -m pip install wheel
           python -m pip install --upgrade setuptools
           python -m pip install moviepy
-          python -m pip install -r requirements.txt
+          pip install -r requirements.txt
 
-      # 4️⃣ Run your main.py script
+      # 4️⃣ Run your main.py
       - name: Run clipper
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
