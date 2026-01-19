@@ -1,89 +1,36 @@
 import os
-import openai
-import yt_dlp
-import whisper
+import random
 from moviepy.editor import VideoFileClip
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
+import openai
+import subprocess
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
-YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
+# ---------------- CONFIG ----------------
+CLIPS_PER_DAY = 8
+SOURCE_CHANNELS = [
+    "https://www.youtube.com/@TheDiaryOfACEO",
+    "https://www.youtube.com/@ImpactTheory",
+    "https://www.youtube.com/@MyFirstMillionPod",
+]
+MIN_CLIP_SECONDS = 20
+MAX_CLIP_SECONDS = 45
+UPLOAD_PRIVACY = "public"
 
-model = whisper.load_model("base")
+# ---------------- API KEYS ----------------
+openai.api_key = os.environ.get("OPENAI_API_KEY")
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY")
 
-def download_video(url):
-    ydl_opts = {
-        "outtmpl": "video.mp4",
-        "format": "mp4"
-    }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
+# ---------------- FUNCTIONS ----------------
 
-def transcribe():
-    result = model.transcribe("video.mp4")
-    return result["segments"]
-
-def find_best_clips(segments):
-    text_blocks = []
-    for s in segments:
-        if 20 <= (s["end"] - s["start"]) <= 45:
-            text_blocks.append({
-                "start": s["start"],
-                "end": s["end"],
-                "text": s["text"]
-            })
-
-    prompt = f"""
-    Pick the top 8 viral podcast moments about business, money, or success.
-    Return JSON only with start and end timestamps.
-    Data: {text_blocks}
+def get_latest_videos(channel_urls, max_results=3):
     """
-
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    return eval(response.choices[0].message.content)
-
-def cut_clip(start, end, index):
-    clip = VideoFileClip("video.mp4").subclip(start, end)
-    clip = clip.resize((1080, 1920))
-    clip.write_videofile(f"clip_{index}.mp4", codec="libx264")
-
-def upload_to_youtube(file, title):
-    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-
-    request = youtube.videos().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": title,
-                "description": "#business #money #podcast",
-                "categoryId": "22"
-            },
-            "status": {
-                "privacyStatus": "public"
-            }
-        },
-        media_body=file
-    )
-    request.execute()
-
-def generate_title(text):
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": f"Create a viral YouTube Shorts title: {text}"}]
-    )
-    return response.choices[0].message.content
-
-def run():
-    from googleapiclient.discovery import build
-
-def get_latest_videos(channel_ids, max_results=3):
+    Fetch latest videos from multiple channels using YouTube Data API
+    """
     youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
     videos = []
-    for channel_url in channel_ids:
-        channel_id = channel_url.split("/")[-1]  # get ID from URL
+    for url in channel_urls:
+        channel_id = url.split("/")[-1]  # extract last part of URL
         request = youtube.search().list(
             part="snippet",
             channelId=channel_id,
@@ -93,24 +40,119 @@ def get_latest_videos(channel_ids, max_results=3):
         )
         response = request.execute()
         for item in response.get("items", []):
-            videos.append(f'https://www.youtube.com/watch?v={item["id"]["videoId"]}')
+            video_id = item["id"]["videoId"]
+            videos.append(f"https://www.youtube.com/watch?v={video_id}")
     return videos
 
-# Replace single VIDEO_URL with:
-video_urls = get_latest_videos(SOURCE_CHANNELS)
-for VIDEO_URL in video_urls:
-    download_video(VIDEO_URL)
-    segments = transcribe()
-    clips = find_best_clips(segments)
-    for i, c in enumerate(clips):
-        cut_clip(c["start"], c["end"], i)
-        title = generate_title(c["text"])
-        upload_to_youtube(f"clip_{i}.mp4", title)
+def download_video(url):
+    """
+    Download video using yt-dlp
+    """
+    filename = "video.mp4"
+    cmd = ["yt-dlp", "-f", "best", url, "-o", filename]
+    subprocess.run(cmd, check=True)
+    return filename
 
-    segments = transcribe()
-    clips = find_best_clips(segments)
+def transcribe_video(filename="video.mp4"):
+    """
+    Transcribe using OpenAI Whisper
+    """
+    try:
+        import whisper
+        model = whisper.load_model("base")
+        result = model.transcribe(filename)
+        return result['segments']
+    except:
+        print("Whisper not installed properly")
+        return []
 
-    for i, c in enumerate(clips):
+def select_clips(segments):
+    """
+    Pick best segments based on length
+    """
+    clips = []
+    for s in segments:
+        start = s['start']
+        end = s['end']
+        duration = end - start
+        if MIN_CLIP_SECONDS <= duration <= MAX_CLIP_SECONDS:
+            clips.append({"start": start, "end": end, "text": s['text']})
+    return clips
+
+def cut_clip(start, end, index):
+    """
+    Cut video segment using MoviePy
+    """
+    clip = VideoFileClip("video.mp4").subclip(start, end)
+    clip.write_videofile(f"clip_{index}.mp4", codec="libx264", audio_codec="aac")
+    return f"clip_{index}.mp4"
+
+def generate_title(text):
+    """
+    Generate title using OpenAI GPT
+    """
+    prompt = f"Create a catchy YouTube Shorts title from this text: {text}"
+    response = openai.Completion.create(
+        engine="text-davinci-003",
+        prompt=prompt,
+        max_tokens=20
+    )
+    return response.choices[0].text.strip()
+
+def upload_to_youtube(filename, title):
+    """
+    Upload clip to YouTube using API
+    """
+    youtube = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
+    body = {
+        "snippet": {
+            "title": title,
+            "description": "Auto-generated clip",
+            "tags": ["podcast", "business", "money", "shorts"],
+        },
+        "status": {
+            "privacyStatus": UPLOAD_PRIVACY
+        }
+    }
+    media = MediaFileUpload(filename)
+    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+    request.execute()
+    print(f"Uploaded {filename} with title: {title}")
+
+# ---------------- MAIN SCRIPT ----------------
+
+def run():
+    video_urls = get_latest_videos(SOURCE_CHANNELS)
+    clips_uploaded = 0
+
+    for url in video_urls:
+        if clips_uploaded >= CLIPS_PER_DAY:
+            break
+
+        print(f"Processing {url}")
+        try:
+            download_video(url)
+        except:
+            print(f"Failed to download {url}")
+            continue
+
+        segments = transcribe_video()
+        clips = select_clips(segments)
+        random.shuffle(clips)  # Randomize clip selection
+
+        for i, clip_data in enumerate(clips):
+            if clips_uploaded >= CLIPS_PER_DAY:
+                break
+            try:
+                clip_file = cut_clip(clip_data["start"], clip_data["end"], i)
+                title = generate_title(clip_data["text"])
+                upload_to_youtube(clip_file, title)
+                clips_uploaded += 1
+            except Exception as e:
+                print(f"Error processing clip: {e}")
+
+if __name__ == "__main__":
+    run()
         cut_clip(c["start"], c["end"], i)
         title = generate_title(c["text"])
         upload_to_youtube(f"clip_{i}.mp4", title)
